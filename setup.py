@@ -7,18 +7,18 @@ package_name = 'scanpy'
 req_path = Path('requires.txt')
 if not req_path.is_file():
     req_path = Path(package_name + '.egg-info') / req_path
-    
 with req_path.open() as requirements:
     requires = [l.strip() for l in requirements]
 
 with open('README.rst', encoding='utf-8') as readme_f:
     readme = readme_f.read()
 
-author = 'Alex Wolf, Philipp Angerer, Davide Cittaro, Gokcen Eraslan, Tobias Callies'
-    
+author = 'Alex Wolf, Philipp Angerer, Davide Cittaro, Gokcen Eraslan, Fidel Ramirez, Tobias Callies'
+
 setup(
     name=package_name,
     version=versioneer.get_version(),
+    cmdclass=versioneer.get_cmdclass(),
     description='Single-Cell Analysis in Python.',
     long_description=readme,
     url='http://github.com/theislab/scanpy',

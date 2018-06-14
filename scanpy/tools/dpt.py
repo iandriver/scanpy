@@ -8,29 +8,57 @@ from .. import logging as logg
 from ..neighbors import Neighbors, OnFlySymMatrix
 
 
-def dpt(adata, n_branchings=0, n_dcs=10, min_group_size=0.01,
+def _diffmap(adata, n_comps=15):
+    logg.info('computing Diffusion Maps using n_comps={}(=n_dcs)'.format(n_comps), r=True)
+    dpt = DPT(adata)
+    dpt.compute_transitions()
+    dpt.compute_eigen(n_comps=n_comps)
+    adata.obsm['X_diffmap'] = dpt.eigen_basis
+    adata.uns['diffmap_evals'] = dpt.eigen_values
+    logg.info('    finished', time=True, end=' ' if settings.verbosity > 2 else '\n')
+    logg.hint('added\n'
+              '    \'X_diffmap\', diffmap coordinates (adata.obsm)\n'
+              '    \'diffmap_evals\', eigenvalues of transition matrix (adata.uns)')
+
+
+def dpt(adata, n_dcs=10, n_branchings=0, min_group_size=0.01,
         allow_kendall_tau_shift=True, copy=False):
-    """Infer progression of cells and branching subgroups [Haghverdi16]_ [Wolf17]_.
+    """Infer progression of cells through geodesic distance along the graph [Haghverdi16]_ [Wolf17i]_.
 
-    This requires to run :func:`~scanpy.api.pp.neighbors`, first.
+    Reconstruct the progression of a biological process from snapshot
+    data. `Diffusion Pseudotime` has been introduced by [Haghverdi16]_ and
+    implemented within Scanpy [Wolf17]_. Here, we use a further developed
+    version, which is able to deal with disconnected graphs [Wolf17i]_ and can
+    be run in a `hierarchical` mode by setting the parameter
+    `n_branchings>1`. We recommend, however, to only use
+    :func:`~scanpy.api.tl.dpt` for computing pseudotime (`n_branchings=0`) and
+    to detect branchings via :func:`~scanpy.api.paga`. For pseudotime, you need
+    to annotate your data with a root cell. For instance::
 
-    Reconstruct the progression of a biological process from snapshot data and
-    detect branching subgroups. `Diffusion Pseudotime analysis` has been
-    introduced by [Haghverdi16]_. Here, we use a further developed, faster and
-    `hierarchical` version, which is able to detect multiple branching events by
-    setting the parameter `n_branchings` [Wolf17]_.
+        adata.uns['iroot'] = np.flatnonzero(adata.obs['cell_types'] == 'Stem')[0]
 
-    The tool is similar to the R package destiny of [Angerer16]_; the Scanpy
-    implementation though runs faster and scales to much higher cell numbers.
+    This requires to run :func:`~scanpy.api.pp.neighbors`, first. In order to
+    reproduce the original implementation of DPT, use `method=='gauss'` in
+    this. Using the default `method=='umap'` only leads to minor quantitative
+    differences, though.
+
+    .. versionadded:: 1.1
+
+    :func:`~scanpy.api.tl.dpt` also requires to run
+    :func:`~scanpy.api.tl.diffmap` first. As previously,
+    :func:`~scanpy.api.tl.dpt` came with a default parameter of ``n_dcs=10`` but
+    :func:`~scanpy.api.tl.diffmap` has a default parameter of ``n_comps=15``,
+    you need to pass ``n_comps=10`` in :func:`~scanpy.api.tl.diffmap` in order
+    to exactly reproduce previous :func:`~scanpy.api.tl.dpt` results.
 
     Parameters
     ----------
     adata : :class:`~scanpy.api.AnnData`
         Annotated data matrix.
-    n_branchings : `int`, optional (default: 1)
-        Number of branchings to detect.
     n_dcs : `int`, optional (default: 10)
-        Use `n_dcs` diffusion components to compute 'dpt' distance.
+        The number of diffusion components to use.
+    n_branchings : `int`, optional (default: 0)
+        Number of branchings to detect.
     min_group_size : [0, 1] or `float`, optional (default: 0.01)
         During recursive splitting of branches ('dpt groups') for `n_branchings`
         > 1, do not consider groups that contain less than `min_group_size` data
@@ -48,51 +76,48 @@ def dpt(adata, n_branchings=0, n_dcs=10, min_group_size=0.01,
     -------
     Depending on `copy`, returns or updates `adata` with the following fields.
 
+    If `n_branchings==0`, no field `dpt_groups` will be written.
+
     dpt_pseudotime : `pd.Series` (`adata.obs`, dtype `float`)
         Array of dim (number of samples) that stores the pseudotime of each
         cell, that is, the DPT distance with respect to the root cell.
-    dpt_groups : `pd.Series` (``adata.obs``, dtype `category`)
+    dpt_groups : `pd.Series` (`adata.obs`, dtype `category`)
         Array of dim (number of samples) that stores the subgroup id ('0',
         '1', ...) for each cell. The groups  typically correspond to
         'progenitor cells', 'undecided cells' or 'branches' of a process.
-    X_diffmap : `np.ndarray` (`adata.obsm`, dtype `float`)
-        Array of shape (#samples) × (#eigen vectors). DiffMap representation of
-        data, which is the right eigen basis of the transition matrix with
-        eigenvectors as columns.
-    diffmap_evals : `np.ndarray` (`adata.uns`)
-        Array of size (number of eigen vectors). Eigenvalues of transition matrix.
+
+    Notes
+    -----
+    The tool is similar to the R package `destiny` of [Angerer16]_.
     """
+    # standard errors, warnings etc.
     adata = adata.copy() if copy else adata
     if 'neighbors' not in adata.uns:
         raise ValueError(
-            'You need to run `pp.neighbors` first to compute a neighborhood graph.')
-    if ('iroot' not in adata.uns
-        and 'xroot' not in adata.uns
-        and 'xroot' not in adata.var):
-        logg.m('    no root cell found, no computation of pseudotime')
-        msg = \
-    '''To enable computation of pseudotime, pass the index or expression vector
-    of a root cell. Either add
-        adata.uns['iroot'] = root_cell_index
-        adata.var['xroot'] = adata[root_cell_name, :].X'''
-        logg.hint(msg)
-    logg.info('performing Diffusion Pseudotime analysis', r=True)
-    dpt = DPT(adata, min_group_size=min_group_size,
+            'You need to run `pp.neighbors` and `tl.diffmap` first.')
+    if 'iroot' not in adata.uns and 'xroot' not in adata.var:
+        logg.warn(
+            'No root cell found. To compute pseudotime, pass the index or '
+            'expression vector of a root cell, one of:\n'
+            '    adata.uns[\'iroot\'] = root_cell_index\n'
+            '    adata.var[\'xroot\'] = adata[root_cell_name, :].X')
+    if 'X_diffmap' not in adata.obsm.keys():
+        logg.warn('Trying to run `tl.dpt` without prior call of `tl.diffmap`. '
+                  'Falling back to `tl.diffmap` with default parameters.')
+        _diffmap(adata)
+    # start with the actual computation
+    dpt = DPT(adata, n_dcs=n_dcs, min_group_size=min_group_size,
               n_branchings=n_branchings,
               allow_kendall_tau_shift=allow_kendall_tau_shift)
-    dpt.compute_transitions()
-    dpt.compute_eigen(n_comps=n_dcs)
-    adata.obsm['X_diffmap'] = dpt.eigen_basis
-    adata.uns['diffmap_evals'] = dpt.eigen_values
+    logg.info('computing Diffusion Pseudotime using n_dcs={}'.format(n_dcs), r=True)
     if n_branchings > 1: logg.info('    this uses a hierarchical implementation')
-    # compute DPT distance matrix, which we refer to as 'Ddiff'
     if dpt.iroot is not None:
         dpt._set_pseudotime()  # pseudotimes are distances from root point
         adata.uns['iroot'] = dpt.iroot  # update iroot, might have changed when subsampling, for example
         adata.obs['dpt_pseudotime'] = dpt.pseudotime
     # detect branchings and partition the data into segments
-    dpt.branchings_segments()
     if n_branchings > 0:
+        dpt.branchings_segments()
         adata.obs['dpt_groups'] = pd.Categorical(
             values=dpt.segs_names.astype('U'),
             categories=natsorted(np.array(dpt.segs_names_unique).astype('U')))
@@ -119,12 +144,12 @@ class DPT(Neighbors):
     """Hierarchical Diffusion Pseudotime.
     """
 
-    def __init__(self, adata, min_group_size=0.01,
+    def __init__(self, adata, n_dcs=None, min_group_size=0.01,
                  n_branchings=0, allow_kendall_tau_shift=False):
-        super(DPT, self).__init__(adata)
+        super(DPT, self).__init__(adata, n_dcs=n_dcs)
         self.flavor = 'haghverdi16'
         self.n_branchings = n_branchings
-        self.min_group_size = min_group_size if min_group_size >= 1 else int(min_group_size * self._adata.X.shape[0])
+        self.min_group_size = min_group_size if min_group_size >= 1 else int(min_group_size * self._adata.shape[0])
         self.passed_adata = adata  # just for debugging purposes
         self.choose_largest_segment = False
         self.allow_kendall_tau_shift = allow_kendall_tau_shift
@@ -167,7 +192,7 @@ class DPT(Neighbors):
         # indices of the points in the segment)
         # initialize the search for branchings with a single segment,
         # that is, get the indices of the whole data set
-        indices_all = np.arange(self._adata.X.shape[0], dtype=int)
+        indices_all = np.arange(self._adata.shape[0], dtype=int)
         # let's keep a list of segments, the first segment to add is the
         # whole data set
         segs = [indices_all]
@@ -273,7 +298,7 @@ class DPT(Neighbors):
             Positions of tips within chosen segment.
         """
         scores_tips = np.zeros((len(segs), 4))
-        allindices = np.arange(self._adata.X.shape[0], dtype=int)
+        allindices = np.arange(self._adata.shape[0], dtype=int)
         for iseg, seg in enumerate(segs):
             # do not consider too small segments
             if segs_tips[iseg][0] == -1: continue
@@ -338,7 +363,7 @@ class DPT(Neighbors):
         # make segs a list of mask arrays, it's easier to store
         # as there is a hdf5 equivalent
         for iseg, seg in enumerate(self.segs):
-            mask = np.zeros(self._adata.X.shape[0], dtype=bool)
+            mask = np.zeros(self._adata.shape[0], dtype=bool)
             mask[seg] = True
             self.segs[iseg] = mask
         # convert to arrays
@@ -347,7 +372,7 @@ class DPT(Neighbors):
 
     def set_segs_names(self):
         """Return a single array that stores integer segment labels."""
-        segs_names = np.zeros(self._adata.X.shape[0], dtype=np.int8)
+        segs_names = np.zeros(self._adata.shape[0], dtype=np.int8)
         self.segs_names_unique = []
         for iseg, seg in enumerate(self.segs):
             segs_names[seg] = iseg

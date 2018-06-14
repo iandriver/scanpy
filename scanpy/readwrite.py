@@ -5,6 +5,7 @@ import os
 import sys
 import numpy as np
 import time
+from pathlib import Path
 from anndata import AnnData, read_loom, \
     read_csv, read_excel, read_text, read_hdf, read_mtx
 from anndata import read as read_h5ad
@@ -12,10 +13,12 @@ from anndata import read as read_h5ad
 from . import settings
 from . import logging as logg
 
-avail_exts = {'anndata', 'csv', 'xlsx',
-              'txt', 'tsv', 'tab', 'data',  # these four are all equivalent
+# .gz and .bz2 suffixes are also allowed for text formats
+text_exts = {'csv',
+             'tsv', 'tab', 'data', 'txt'} # these four are all equivalent
+avail_exts = {'anndata', 'xlsx',
               'h5', 'h5ad',
-              'soft.gz', 'txt.gz', 'mtx'}
+              'soft.gz', 'mtx'} | text_exts
 """Available file formats for reading data. """
 
 
@@ -25,7 +28,7 @@ avail_exts = {'anndata', 'csv', 'xlsx',
 
 
 def read(filename, backed=False, sheet=None, ext=None, delimiter=None,
-         first_column_names=False, backup_url=None, cache=None):
+         first_column_names=False, backup_url=None, cache=False):
     """Read file and return :class:`~scanpy.api.AnnData` object.
 
     To speed up reading, consider passing `cache=True`, which creates an hdf5
@@ -45,8 +48,8 @@ def read(filename, backed=False, sheet=None, ext=None, delimiter=None,
         of the AnnData object, you need to choose 'r+'.
     sheet : `str`, optional (default: `None`)
         Name of sheet/table in hdf5 or Excel file.
-    cache : `bool` or `None`, optional (default: `False`)
-        If `False`, read from source, if `True`, read from fast 'h5' cache.
+    cache : `bool`, optional (default: `False`)
+        If `False`, read from source, if `True`, read from fast 'h5ad' cache.
     ext : `str`, optional (default: `None`)
         Extension that indicates the file type. If `None`, uses extension of
         filename.
@@ -84,7 +87,7 @@ def read(filename, backed=False, sheet=None, ext=None, delimiter=None,
 
 
 def read_10x_h5(filename, genome='mm10'):
-    """Read 10X-Genomics-formatted hdf5 file.
+    """Read 10x-Genomics-formatted hdf5 file.
 
     Parameters
     ----------
@@ -200,8 +203,6 @@ def read_params(filename, asheader=False, verbosity=0):
         Dictionary that stores parameters.
     """
     filename = str(filename)  # allow passing pathlib.Path objects
-    if not asheader:
-        settings.m(verbosity, 'reading params file', filename)
     from collections import OrderedDict
     params = OrderedDict([])
     for line in open(filename):
@@ -259,7 +260,7 @@ def get_params_from_list(params_list):
 
 
 def _read(filename, backed=False, sheet=None, ext=None, delimiter=None,
-          first_column_names=None, backup_url=None, cache=None,
+          first_column_names=None, backup_url=None, cache=False,
           suppress_cache_warning=False):
     if ext is not None and ext not in avail_exts:
         raise ValueError('Please provide one of the available extensions.\n'
@@ -279,7 +280,6 @@ def _read(filename, backed=False, sheet=None, ext=None, delimiter=None,
     # read other file types
     filename_cache = (settings.cachedir + filename.lstrip(
         './').replace('/', '-').replace('.' + ext, '.h5ad'))
-    cache = not settings.recompute == 'read' if cache is None else cache
     if cache and os.path.exists(filename_cache):
         logg.info('... reading from cache file', filename_cache)
         adata = read_h5ad(filename_cache, backed=False)
@@ -309,8 +309,6 @@ def _read(filename, backed=False, sheet=None, ext=None, delimiter=None,
             adata = read_text(filename, delimiter, first_column_names)
         elif ext == 'soft.gz':
             adata = _read_softgz(filename)
-        elif ext == 'txt.gz':
-            sys.exit('TODO: implement similar to read_softgz')
         else:
             raise ValueError('Unkown extension {}.'.format(ext))
         if cache:
@@ -340,12 +338,11 @@ def _read_softgz(filename):
     """
     filename = str(filename)  # allow passing pathlib.Path objects
     import gzip
-    with gzip.open(filename) as file:
+    with gzip.open(filename, mode='rt') as file:
         # The header part of the file contains information about the
         # samples. Read that information first.
         samples_info = {}
         for line in file:
-            line = line.decode("utf-8")
             if line.startswith("!dataset_table_begin"):
                 break
             elif line.startswith("!subset_description"):
@@ -356,7 +353,7 @@ def _read_softgz(filename):
                 for k in subset_ids:
                     samples_info[k] = subset_description
         # Next line is the column headers (sample id's)
-        sample_names = file.readline().decode("utf-8").split("\t")
+        sample_names = file.readline().strip().split("\t")
         # The column indices that contain gene expression data
         I = [i for i, x in enumerate(sample_names) if x.startswith("GSM")]
         # Restrict the column headers to those that we keep
@@ -367,7 +364,6 @@ def _read_softgz(filename):
         # identifiers
         gene_names, X = [], []
         for line in file:
-            line = line.decode("utf-8")
             # This is what signals the end of the gene expression data
             # section in the file
             if line.startswith("!dataset_table_end"):
@@ -506,12 +502,20 @@ def check_datafile_present_and_download(filename, backup_url=None):
 
 def is_valid_filename(filename, return_ext=False):
     """Check whether the argument is a filename."""
-    for ext in avail_exts:
-        if filename.endswith('.' + ext):
-            return ext if return_ext else True
-    if return_ext:
-        raise ValueError('"{}" does not end on a valid extension.\n'
-                         'Please, provide one of the available extensions.\n{}'
-                         .format(filename, avail_exts))
+    ext = Path(filename).suffixes
+
+    # cases for gzipped/bzipped text files
+    if len(ext) == 2 and ext[0][1:] in text_exts and ext[1][1:] in ('gz', 'bz2'):
+        return ext[0][1:] if return_ext else True
+    elif ext[-1][1:] in avail_exts:
+        return ext[-1][1:] if return_ext else True
+    elif ''.join(ext) == '.soft.gz':
+        return 'soft.gz' if return_ext else True
     else:
-        return False
+        if return_ext:
+            raise ValueError('"{}" does not end on a valid extension.\n'
+                             'Please, provide one of the available extensions.\n{}\n'
+                             'Text files with .gz and .bz2 extensions are also supported.'
+                             .format(filename, avail_exts))
+        else:
+            return False

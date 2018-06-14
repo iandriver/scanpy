@@ -1,14 +1,39 @@
-See the documentation of version 0.4.4 `here <http://scanpy.readthedocs.io/en/0.4.4/>`_. See a list of all releases `here <https://github.com/theislab/scanpy/releases>`_.
+.. note::
+
+    Also see the release notes of `anndata <http://anndata.readthedocs.org>`_.
+
+.. role:: small
 
 
-**Soon**
+Version 1.2.1 :small:`June 9, 2018`
+-----------------------------------
 
-- more canonical analyses steps like clustering genes, computing correlations...
+- :func:`pl.highest_expr_genes` for quality control, see `here <https://github.com/theislab/scanpy/pull/169>`_; plot genes with highest mean fraction of cells, similar to plotQC of *Scater* [McCarthy17]_ - thanks to F Ramirez
 
-- exporting to Gephi from :class:`~scanpy.api.Neighbors`
-  
 
-**March 28, 2018**: version 1.0
+Version 1.2 :small:`June 8, 2018`
+---------------------------------
+
+- :func:`~scanpy.api.tl.paga` improved, see `theislab/paga <https://github.com/theislab/paga>`_; the default model changed, restore the previous default model by passing `model='v1.0'`
+
+
+Version 1.1 :small:`May 31, 2018`
+---------------------------------
+
+- :func:`~scanpy.api.set_figure_params` by default passes `vector_friendly=True` and allows you to produce reasonable pdfs by rasterizing large scatter plots
+- :func:`~scanpy.api.tl.draw_graph` now defaults to the ForceAtlas2 layout [Jacomy14]_ [Chippada18]_, which is often more visually appealing and whose computation is much faster - thanks to S Wollock
+- :func:`~scanpy.api.pl.scatter` also plots along variables axis - thanks to MD Luecken
+- :func:`~scanpy.api.pp.pca` and :func:`~scanpy.api.pp.log1p` support chunk processing - thanks to S Rybakov
+- :func:`~scanpy.api.pp.regress_out` is back to multiprocessing - thanks to F Ramirez
+- :func:`~scanpy.api.read` reads compressed text files - thanks to G Eraslan
+- :func:`~scanpy.api.queries.mitochondrial_genes` for querying mito genes - thanks to FG Brundu
+- :func:`~scanpy.api.pp.mnn_correct` for batch correction [Haghverdi18]_ [Kang18]_
+- :func:`~scanpy.api.tl.phate` for low-dimensional embedding [Moon17]_
+- :func:`~scanpy.api.tl.sandbag`, :func:`~scanpy.api.tl.cyclone` for scoring genes [Scialdone15]_ [Fechtner18]_
+
+
+Version 1.0 :small:`March 28, 2018`
+-----------------------------------
 
 Scanpy is much faster and more memory efficient. Preprocess, cluster and visualize
 1.3M cells in `6 h
@@ -29,17 +54,21 @@ delegated.
    - the graph-based tools :func:`~scanpy.api.tl.louvain`
      :func:`~scanpy.api.tl.dpt` :func:`~scanpy.api.tl.draw_graph`
      :func:`~scanpy.api.tl.umap` :func:`~scanpy.api.tl.diffmap`
-     :func:`~scanpy.api.tl.paga` now require prior computation of the graph::
-     
+     :func:`~scanpy.api.tl.paga` now require prior computation of the graph:
+
+     .. code:: python
+
          sc.pp.neighbors(adata, n_neighbors=5)
          sc.tl.louvain(adata)
-     
-     instead of previously::
-     
+
+     instead of previously:
+
+     .. code:: python
+
          sc.tl.louvain(adata, n_neighbors=5)
-         
+
    - install `numba` via ``conda install numba``, which replaces cython
-      
+
    - the default connectivity measure (dpt will look different using default
      settings) changed. setting `method='gauss'` in `sc.pp.neighbors` uses
      gauss kernel connectivities and reproduces the previous behavior,
@@ -60,7 +89,7 @@ delegated.
      some results might therefore look slightly different
 
 Further changes are
-   
+
 - UMAP [McInnes18]_ can serve as a first visualization of the data just as tSNE,
   in contrast to tSNE, UMAP directly embeds the single-cell graph and is faster;
   UMAP is now also used for measuring connectivities and computing neighbors,
@@ -71,16 +100,16 @@ Further changes are
   pseudotime and clustering need to be computed separately via
   :func:`~scanpy.api.tl.louvain` and :func:`~scanpy.api.tl.dpt`, the
   connectivity measure has been improved
-           
+
 - logistic regression for finding marker genes
   :func:`~scanpy.api.tl.rank_genes_groups` with parameter `method='logreg'`
 
 - :func:`~scanpy.api.tl.louvain` now provides a better implementation for
-  reclustering via `restrict_to`        
-        
+  reclustering via `restrict_to`
+
 - scanpy no longer modifies rcParams upon import, call
   `settings.set_figure_params` to set the 'scanpy style'
-      
+
 - default cache directory is ``./cache/``, set `settings.cachedir` to change
   this; nested directories in this are now avoided
 
@@ -88,15 +117,15 @@ Further changes are
   :func:`~scanpy.api.tl.draw_graph` and :func:`~scanpy.api.umap` by passing
   `edges=True`
 
-- :func:`~scanpy.api.pp.downsample_counts` function
+- :func:`~scanpy.api.pp.downsample_counts` for downsampling counts - thanks to MD Luecken
 
 - default 'louvain_groups' are now called 'louvain'
 
 - 'X_diffmap' now contains the zero component, plotting remains unchanged
-     
-  
 
-**February 26, 2018**: version 0.4.4
+
+Version 0.4.4 :small:`February 26, 2018`
+----------------------------------------
 
 1. embed cells using :func:`~scanpy.api.tl.umap` [McInnes18]_: `examples <https://github.com/theislab/scanpy/pull/92>`_
 2. score sets of genes, e.g. for cell cycle, using :func:`~scanpy.api.tl.score_genes` [Satija15]_: `notebook <https://nbviewer.jupyter.org/github/theislab/scanpy_usage/blob/master/180209_cell_cycle/cell_cycle.ipynb>`_

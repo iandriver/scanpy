@@ -15,7 +15,6 @@ def louvain(
         adjacency=None,
         flavor='vtraag',
         directed=True,
-        n_jobs=None,
         copy=False):
     """Cluster cells into subgroups [Blondel08]_ [Levine15]_ [Traag17]_.
 
@@ -23,12 +22,12 @@ def louvain(
     of [Traag17]_. The Louvain algorithm has been proposed for single-cell
     analysis by [Levine15]_.
 
+    This requires to run :func:`~scanpy.api.pp.neighbors`, first.
+
     Parameters
     ----------
     adata : :class:`~scanpy.api.AnnData`
         The annotated data matrix.
-    n_neighbors : `int`, optional (default: 30)
-        Number of neighbors to use for construction of knn graph.
     resolution : `float` or `None`, optional (default: 1)
         For the default flavor ('vtraag'), you can provide a resolution (higher
         resolution means finding more and smaller clusters), which defaults to
@@ -46,7 +45,7 @@ def louvain(
     flavor : {'vtraag', 'igraph'}
         Choose between to packages for computing the clustering. 'vtraag' is
         much more powerful.
-    copy : `bool` (default: False)
+    copy : `bool` (default: `False`)
         Copy adata or modify it inplace.
 
     Returns
@@ -69,6 +68,11 @@ def louvain(
         if not isinstance(restrict_categories[0], str):
             raise ValueError('You need to use strings to label categories, '
                              'e.g. \'1\' instead of 1.')
+        for c in restrict_categories:
+            if c not in adata.obs[restrict_key].cat.categories:
+                raise ValueError(
+                    '\'{}\' is not a valid category for \'{}\''
+                    .format(c, restrict_key))
         restrict_indices = adata.obs[restrict_key].isin(restrict_categories).values
         adjacency = adjacency[restrict_indices, :]
         adjacency = adjacency[:, restrict_indices]
@@ -120,11 +124,13 @@ def louvain(
             categories=natsorted(unique_groups.astype('U')))
     else:
         key_added = restrict_key + '_R' if key_added is None else key_added
-        adata.obs[key_added] = adata.obs[restrict_key].astype('U')
-        adata.obs[key_added].iloc[restrict_indices] = '-'.join(restrict_categories) + ','
-        adata.obs[key_added].iloc[restrict_indices] += groups.astype('U')
-        adata.obs[key_added] = adata.obs[key_added].astype(
-            'category', categories=natsorted(adata.obs[key_added].unique()))
+        all_groups = adata.obs[restrict_key].astype('U')
+        prefix = '-'.join(restrict_categories) + ','
+        new_groups = [prefix + g for g in groups.astype('U')]
+        all_groups.iloc[restrict_indices] = new_groups
+        adata.obs[key_added] = pd.Categorical(
+            values=all_groups,
+            categories=natsorted(all_groups.unique()))
     adata.uns['louvain'] = {}
     adata.uns['louvain']['params'] = {'resolution': resolution, 'random_state': random_state}
     logg.info('    finished', time=True, end=' ' if settings.verbosity > 2 else '\n')
